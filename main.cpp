@@ -80,7 +80,7 @@ int main() {
     //cout << sdata << endl;
     if (sdata.size() > 2 && sdata[0] == '4' && sdata[1] == '2') {
       string s = hasData(sdata);
-      std::cout << "s = " << s << "\n";
+      //std::cout << "s = " << s << "\n";
       if (s != "") {
         auto j = json::parse(s);
         string event = j[0].get<string>();
@@ -92,37 +92,18 @@ int main() {
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
-          double vmps = v * 0.44704;
-          
-          double dt = 0.1; // latency in s
-          
-// ********** BELOW VALUES ARE IN Car reference frame!  Need to be transformed to map reference frame!          
-          double dxcar = vmps * cos(psi) * dt;
-          double dycar = vmps * sin(psi) * dt;
-          
-          double dx = dxcar * cos(0 - psi) - dycar * sin(0 - psi);
-          double dy = dxcar * sin(0 - psi) + dycar * cos(0 - psi);    
-          
-          px = px + dx;
-          py = py + dy;
           
           double steer_value = j[1]["steering_angle"];
           double throttle_value = j[1]["throttle"];
           double Lf = 2.67;
           
-          psi = psi - vmps * steer_value * deg2rad(25) * Lf * dt;
-          
           for (int i = 0; i < ptsx.size(); i++)
           {
-        	  
-        	  	  
         	  double shift_x = ptsx[i] - px;
         	  double shift_y = ptsy[i] - py;
         	  
         	  ptsx[i] = (shift_x * cos(0 - psi) - shift_y * sin(0 - psi));
         	  ptsy[i] = (shift_x * sin(0 - psi) + shift_y * cos(0 - psi));    
-        	  
-        	  
           }
           
           
@@ -134,22 +115,21 @@ int main() {
           
           auto coeffs = polyfit(ptsx_transform, ptsy_transform, 3);
 
-          double cte = polyeval(coeffs, dx) - dy;
-          double epsi = psi - atan(coeffs[1] + 2 * coeffs[2] * dx + 3 * coeffs[3] * dx * dx);
+          double cte = coeffs[0];
+          double epsi = - atan(coeffs[1]);
           
-          vmps = vmps + throttle_value * dt;
-          v = vmps/0.44704;
+          Eigen::VectorXd state(8);
+          state << 0, 0, 0, v, cte, epsi, steer_value, throttle_value;
           
-          Eigen::VectorXd state(6);
-          state << 0, 0, 0, v, cte, epsi;
+          //std::cout << "main before MPC \n\n";
           
           auto vars = mpc.Solve(state, coeffs);
-
+          
+          //std::cout << "main after MPC \n\n";
 
           //Display the waypoints/reference line
           vector<double> next_x_vals;
           vector<double> next_y_vals;
-
           
           double poly_inc = 2.5;
   	  	  int num_points = 25;
@@ -158,7 +138,6 @@ int main() {
   	  		  next_x_vals.push_back(poly_inc*i);
   	  		  next_y_vals.push_back(polyeval(coeffs, poly_inc * i));
   	  	  }
-          
           
           vector<double> mpc_x_vals;
           vector<double> mpc_y_vals;
@@ -177,7 +156,8 @@ int main() {
   	  	  
   	  	  json msgJson;
   	  	  
-          msgJson["steering_angle"] = -vars[0]/(deg2rad(25)*Lf);
+          msgJson["steering_angle"] = -vars[0]/(deg2rad(25) * Lf);
+          //std::cout << "steering_angle = " << -vars[0]/(deg2rad(25) * Lf) << "\n";
           msgJson["throttle"] = vars[1];
           //Display the waypoints/reference line
           msgJson["next_x"] = next_x_vals;
@@ -197,9 +177,9 @@ int main() {
           // NOTE: REMEMBER TO SET THIS TO 100 MILLISECONDS BEFORE
           // SUBMITTING.
           
-          long del = (long)round(1000*dt);
-          this_thread::sleep_for(chrono::milliseconds(del));
+          this_thread::sleep_for(chrono::milliseconds(100));
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+          
           //std::cout << msg << msg.data() << "\n";
         }
       } else {
