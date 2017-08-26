@@ -6,7 +6,7 @@
 using CppAD::AD;
 
 // TODO: Set the timestep length and duration
-size_t N = 20;
+size_t N = 10;
 double dt = 0.1;
 
 // This value assumes the model presented in the classroom is used.
@@ -23,7 +23,7 @@ const double Lf = 2.67;
 
 double ref_cte = 0;
 double ref_epsi = 0;
-double ref_v = 20;
+double ref_v = 100*.44704;
 
 size_t x_start     = 0;
 size_t y_start     = x_start + N;
@@ -53,19 +53,21 @@ class FG_eval {
 
     // The part of the cost based on the reference state.
     for (int i = 0; i < N; i++) {
-      fg[0] += CppAD::pow(vars[cte_start + i], 2);
-      fg[0] += CppAD::pow(vars[epsi_start + i], 2);
-      fg[0] += 1 * CppAD::pow(vars[v_start + i] - ref_v, 2);
+      fg[0] += 1*CppAD::pow(vars[cte_start + i], 4); // 3
+      fg[0] += 3*CppAD::pow(vars[epsi_start + i], 2); // 50
+      fg[0] += CppAD::pow(vars[v_start + i] - ref_v, 2); //1
     }
     // Minimize the use of actuators.
    for (int i = 0; i < N - 1; i++) {
-      fg[0] += CppAD::pow(vars[delta_start + i], 2);
-      fg[0] += CppAD::pow(vars[a_start + i], 2);
+      fg[0] += 0*CppAD::pow(vars[delta_start + i], 2); // 1000
+      fg[0] += CppAD::pow(vars[a_start + i], 2); //1
     }
     // Minimize the value gap between sequential actuations.
     for (int i = 0; i < N - 2; i++) {
-      fg[0] += CppAD::pow(vars[delta_start + i + 1] - vars[delta_start + i], 2);
-      fg[0] += CppAD::pow(vars[a_start + i + 1] - vars[a_start + i], 2);
+      fg[0] += 1000*CppAD::pow(vars[delta_start + i + 1] - vars[delta_start + i], 2); // 2000
+      fg[0] += CppAD::pow(vars[a_start + i + 1] - vars[a_start + i], 2); // 1
+      fg[0] += 5*CppAD::pow(vars[cte_start  + i + 1] - vars[cte_start  + 1], 2); // 30
+      fg[0] += 0*CppAD::pow(vars[epsi_start + i + 1] - vars[epsi_start + i], 2); // 30
     }
 	    
     //
@@ -114,15 +116,29 @@ class FG_eval {
           // Here's `x` to get you started.
           // The idea here is to constraint this value to be 0.
           //
+          
+          // v = v0;
+          // R = Lf / delta0;
+          //psi_dot = v0 * delta0 / Lf;
+          
+          AD<double> zero(0.);
+          AD<double> adelta0 = fabs(delta0);
+          
+          AD<double> d0x = x1 - (x0 + v0 * CppAD::cos(psi0) * dt);
+          AD<double> d0y = y1 - (y0 + v0 * CppAD::sin(psi0) * dt);
+          AD<double> psi1c = psi0 + v0 * delta0 / Lf * dt;
+          
+          AD<double> dn0x = x1 - (x0 + Lf / (delta0+0.00001) * (CppAD::sin(psi1c) - CppAD::sin(psi0)));
+          AD<double> dn0y = y1 - (y0 + Lf / (delta0+0.00001) * (CppAD::cos(psi0)  - CppAD::cos(psi1c)));
+          
+          
+          fg[2 + x_start    + i] = CppAD::CondExpGt(adelta0, zero, d0x, dn0x);
+          fg[2 + y_start    + i] = CppAD::CondExpGt(adelta0, zero, d0y, dn0y);
+          fg[2 + psi_start  + i] = psi1  - psi1c;
+          fg[2 + v_start    + i] = v1    - (v0 + a0 * dt);
+          fg[2 + cte_start  + i] = cte1  - ((f0 - y0) + (v0 * CppAD::sin(epsi0) * dt));
+          fg[2 + epsi_start + i] = epsi1 - ((psi0 - psides0) + v0 * delta0 / Lf * dt);
 
-          fg[2 + x_start    + i] = x1 - (x0 + v0 * CppAD::cos(psi0) * dt);
-          fg[2 + y_start    + i] = y1 - (y0 + v0 * CppAD::sin(psi0) * dt);
-          fg[2 + psi_start  + i] = psi1 - (psi0 + v0 * delta0 / Lf * dt);
-          fg[2 + v_start    + i] = v1 - (v0 + a0 * dt);
-          fg[2 + cte_start  + i] =
-              cte1 - ((f0 - y0) + (v0 * CppAD::sin(epsi0) * dt));
-          fg[2 + epsi_start + i] =
-              epsi1 - ((psi0 - psides0) + v0 * delta0 / Lf * dt);
      }  
      //std::cout << "set changes \n\n";
   }
@@ -147,9 +163,8 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   double v    = state[3] * 0.44704; // converts mph to m/s
   double cte  = state[4];
   double epsi = state[5];
-  double sa   = - state[6] * 25 * M_PI / 180 * Lf; // steering angle converted to radians
+  double sa   = - state[6]; // steering angle in radians
   double th   = state[7]; // throttle
-  
   size_t n_vars = N * 6 + ( N - 1) * 2;
   // TODO: Set the number of constraints
   size_t n_constraints = N * 6;
@@ -170,7 +185,7 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   vars[v_start] = v;
   vars[cte_start] = cte;
   vars[epsi_start] = epsi;
-  vars[delta_start] = sa * Lf;
+  vars[delta_start] = sa;
   vars[a_start]    = th;
 
   //std::cout << "init values set \n\n";
@@ -193,15 +208,15 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   // degrees (values in radians).
   // NOTE: Feel free to change this to something else.
   for (int i = delta_start; i < a_start; i++) {
-    vars_lowerbound[i] = -0.436332 * Lf;
-    vars_upperbound[i] = 0.436332 * Lf;
+    vars_lowerbound[i] = -0.436332;
+    vars_upperbound[i] =  0.436332;
   }
 
   // Acceleration/decceleration upper and lower limits.
   // NOTE: Feel free to change this to something else.
   for (int i = a_start; i < n_vars; i++) {
     vars_lowerbound[i] = -1.0;
-    vars_upperbound[i] = 1.0;
+    vars_upperbound[i] =  1.0;
   }
   
   vars_lowerbound[delta_start]= sa;
