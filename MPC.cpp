@@ -6,6 +6,7 @@
 using CppAD::AD;
 
 // TODO: Set the timestep length and duration
+// 10 and .1 from the project video worked well
 size_t N = 10;
 double dt = 0.1;
 
@@ -23,7 +24,8 @@ const double Lf = 2.67;
 
 double ref_cte = 0;
 double ref_epsi = 0;
-double ref_v = 100*.44704;
+double ref_v = 115*.44704; // If straignt and not errors, goal was set to 115 MPH
+// This is slightly higer than the max achieved top speed of 111 MPH.
 
 size_t x_start     = 0;
 size_t y_start     = x_start + N;
@@ -53,22 +55,58 @@ class FG_eval {
 
     // The part of the cost based on the reference state.
     for (int i = 0; i < N; i++) {
-      fg[0] += 1*CppAD::pow(vars[cte_start + i], 4); // 3
-      fg[0] += 3*CppAD::pow(vars[epsi_start + i], 2); // 50
-      fg[0] += CppAD::pow(vars[v_start + i] - ref_v, 2); //1
+      //  Reference value.  Exponent of 4 was selected to make small errors small, and large errors large
+      fg[0] +=  1 * CppAD::pow(vars[cte_start + i], 4);
+      
+      //  At 50 m/s a one degree error will creat a cross track error of 0.85 m in 0.1s with a value of 10
+      fg[0] +=  10 * CppAD::pow(vars[epsi_start + i], 2);
+      
+      // Below kept the throttle at one unless the had a high lateral accleration
+      fg[0] +=  5 * CppAD::pow(vars[v_start + i] - ref_v, 2);
     }
+    
     // Minimize the use of actuators.
-   for (int i = 0; i < N - 1; i++) {
-      fg[0] += 0*CppAD::pow(vars[delta_start + i], 2); // 1000
-      fg[0] += CppAD::pow(vars[a_start + i], 2); //1
-    }
+    // This is a race car. Not needed.
+   //for (int i = 0; i < N - 1; i++) {
+   //   fg[0] += 0 * CppAD::pow(vars[delta_start + i], 2); // 1
+   //   fg[0] += 0 * CppAD::pow(vars[a_start + i], 2);     // 
+   // }
+    
     // Minimize the value gap between sequential actuations.
     for (int i = 0; i < N - 2; i++) {
-      fg[0] += 1000*CppAD::pow(vars[delta_start + i + 1] - vars[delta_start + i], 2); // 2000
-      fg[0] += CppAD::pow(vars[a_start + i + 1] - vars[a_start + i], 2); // 1
-      fg[0] += 5*CppAD::pow(vars[cte_start  + i + 1] - vars[cte_start  + 1], 2); // 30
-      fg[0] += 0*CppAD::pow(vars[epsi_start + i + 1] - vars[epsi_start + i], 2); // 30
+      // Required for stability and to bound the change in the steering angle
+      fg[0] += 3000*CppAD::pow(vars[delta_start + i + 1] - vars[delta_start + i], 2); //
+      
+      // Very slight damping of throttle and brake.
+      fg[0] += 1*CppAD::pow(vars[a_start + i + 1] - vars[a_start + i], 2);
+      
+      // Required to prevent left/ right oscillations.  Tuned so that oscillations quickly decayed.
+      // Also wanted to make sure CTE error returned to zero in about 0.5 s.
+      // At a multiple of 10, a change in one meter in one time step is equialent to a 1 m error.
+      fg[0] += 10*CppAD::pow(vars[cte_start  + i + 1] - vars[cte_start  + 1], 2); // 5
+      
+      // Angles cannot jump.  Below was not needed.
+      // fg[0] += 0*CppAD::pow(vars[epsi_start + i + 1] - vars[epsi_start + i], 2); // 0
     }
+    
+    // Penalize lateral acceleration
+    // Basically, limits speed so that if the CL was followed, the maximum accleration is set at line 99
+    for (int i = 0; i < N; i++) {
+      AD<double> xfit = vars[x_start + i];
+      AD<double> dydxfit  = 3 * coeffs[3] * xfit * xfit + 2 * coeffs[2] * xfit + coeffs[1];
+      AD<double> dydx2fit = CppAD::fabs(6 * coeffs[3] * xfit + 2 * coeffs[2]);
+      AD<double> nearzero(0.0001);
+      AD<double> Rfit = CppAD::pow(1 + dydxfit * dydxfit, 1.5) / CppAD::CondExpGt(dydx2fit, nearzero, dydx2fit, nearzero);  
+      AD<double> lat_acc = CppAD::fabs(vars[v_start+i] * vars[v_start + i] / Rfit);
+      AD<double> lat_acc_th = 2.0 * 9.8; // #gs * gravity 
+      AD<double> d_lat_acc = lat_acc - lat_acc_th;
+      AD<double> lat_acc_eval = CppAD::CondExpGt(d_lat_acc, nearzero, d_lat_acc, nearzero);
+      //std::cout << "lat acc = " << lat_acc << " th = " << lat_acc_th << " eval = " << lat_acc_eval << "\n";
+      fg[0] +=  0.5 * CppAD::pow(lat_acc_eval, 2); // 
+      
+    }
+    
+    
 	    
     //
     // Setup Constraints
@@ -119,17 +157,23 @@ class FG_eval {
           
           // v = v0;
           // R = Lf / delta0;
-          //psi_dot = v0 * delta0 / Lf;
+          // psi_dot = v0 * delta0 / Lf;
+          // Used non-linear motion model from the Unscented filter project
           
           AD<double> zero(0.);
-          AD<double> adelta0 = fabs(delta0);
           
           AD<double> d0x = x1 - (x0 + v0 * CppAD::cos(psi0) * dt);
           AD<double> d0y = y1 - (y0 + v0 * CppAD::sin(psi0) * dt);
           AD<double> psi1c = psi0 + v0 * delta0 / Lf * dt;
           
-          AD<double> dn0x = x1 - (x0 + Lf / (delta0+0.00001) * (CppAD::sin(psi1c) - CppAD::sin(psi0)));
-          AD<double> dn0y = y1 - (y0 + Lf / (delta0+0.00001) * (CppAD::cos(psi0)  - CppAD::cos(psi1c)));
+          AD<double> adelta0 = CppAD::fabs(delta0);
+          AD<double> deladj;
+          
+          AD<double> small(0.000001);
+          deladj = CppAD::CondExpEq(adelta0, zero, small, zero);
+          
+          AD<double> dn0x = x1 - (x0 + Lf / (delta0+deladj) * (CppAD::sin(psi1c) - CppAD::sin(psi0)));
+          AD<double> dn0y = y1 - (y0 + Lf / (delta0+deladj) * (CppAD::cos(psi0)  - CppAD::cos(psi1c)));
           
           
           fg[2 + x_start    + i] = CppAD::CondExpGt(adelta0, zero, d0x, dn0x);
@@ -297,8 +341,11 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   
   result.clear();
   
-  result.push_back(solution.x[delta_start+1]);
-  result.push_back(solution.x[a_start+1]);
+  // To deal with delay, sent back NEXT time step to main.
+  // Next time step and delay are both 100 ms.
+  
+  result.push_back(solution.x[delta_start + 1]);
+  result.push_back(solution.x[a_start + 1]);
   
   for (int i = 0; i < N - 1; i++)
   {

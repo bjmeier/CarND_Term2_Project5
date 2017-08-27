@@ -96,7 +96,6 @@ int main() {
           double steer_value = j[1]["steering_angle"];
           double throttle_value = j[1]["throttle"];
           
-          std::cout << "meas steer_value = " << steer_value << "\n";
           double Lf = 2.67;
           
           for (int i = 0; i < ptsx.size(); i++)
