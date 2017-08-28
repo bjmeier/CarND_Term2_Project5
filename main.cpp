@@ -96,8 +96,6 @@ int main() {
           double steer_value = j[1]["steering_angle"];
           double throttle_value = j[1]["throttle"];
           
-          double Lf = 2.67;
-          
           for (int i = 0; i < ptsx.size(); i++)
           {
         	  double shift_x = ptsx[i] - px;
@@ -158,7 +156,7 @@ int main() {
   	  	  json msgJson;
   	  	  
           msgJson["steering_angle"] = -vars[0] / deg2rad(25);
-          std::cout << "Steering_angle = " << -vars[0] / deg2rad(25) << " Throttle = " << vars[1] << "\n";
+          // std::cout << "Steering_angle = " << -vars[0] / deg2rad(25) << " Throttle = " << vars[1] << "\n";
           msgJson["throttle"] = vars[1];
           //Display the waypoints/reference line
           msgJson["next_x"] = next_x_vals;

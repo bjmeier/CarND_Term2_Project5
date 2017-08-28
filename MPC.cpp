@@ -21,11 +21,14 @@ double dt = 0.1;
 //
 // This is the length from front to CoG that has a similar radius.
 const double Lf = 2.67;
+const double mph_to_mps = 0.44704;
+const double max_delta = 25 * M_PI / 180; // max allowable steering angle is 25 degrees
 
 double ref_cte = 0;
 double ref_epsi = 0;
-double ref_v = 115*.44704; // If straignt and not errors, goal was set to 115 MPH
-// This is slightly higer than the max achieved top speed of 111 MPH.
+// lateral acceleration is used to control speed
+//double ref_v = 113 * mph_to_mps; // If straignt and no errors, goal speed isset to 113 MPH
+// This is slightly higer than the max trial run top speed of 111 MPH.
 
 size_t x_start     = 0;
 size_t y_start     = x_start + N;
@@ -54,7 +57,7 @@ class FG_eval {
 	fg[0] = 0;
 
     // The part of the cost based on the reference state.
-    for (int i = 0; i < N; i++) {
+    for (int i = 1; i < N; i++) {
       //  Reference value.  Exponent of 4 was selected to make small errors small, and large errors large
       fg[0] +=  1 * CppAD::pow(vars[cte_start + i], 4);
       
@@ -62,7 +65,7 @@ class FG_eval {
       fg[0] +=  10 * CppAD::pow(vars[epsi_start + i], 2);
       
       // Below kept the throttle at one unless the had a high lateral accleration
-      fg[0] +=  5 * CppAD::pow(vars[v_start + i] - ref_v, 2);
+      //fg[0] +=  5 * CppAD::pow(vars[v_start + i] - ref_v, 2);
     }
     
     // Minimize the use of actuators.
@@ -73,12 +76,12 @@ class FG_eval {
    // }
     
     // Minimize the value gap between sequential actuations.
-    for (int i = 0; i < N - 2; i++) {
+    for (int i = 1; i < N - 2; i++) {
       // Required for stability and to bound the change in the steering angle
       fg[0] += 3000*CppAD::pow(vars[delta_start + i + 1] - vars[delta_start + i], 2); //
       
       // Very slight damping of throttle and brake.
-      fg[0] += 1*CppAD::pow(vars[a_start + i + 1] - vars[a_start + i], 2);
+      fg[0] += 0*CppAD::pow(vars[a_start + i + 1] - vars[a_start + i], 2);
       
       // Required to prevent left/ right oscillations.  Tuned so that oscillations quickly decayed.
       // Also wanted to make sure CTE error returned to zero in about 0.5 s.
@@ -89,25 +92,23 @@ class FG_eval {
       // fg[0] += 0*CppAD::pow(vars[epsi_start + i + 1] - vars[epsi_start + i], 2); // 0
     }
     
-    // Penalize lateral acceleration
-    // Basically, limits speed so that if the CL was followed, the maximum accleration is set at line 99
-    for (int i = 0; i < N; i++) {
+    // Using lateral acceleration to control speed
+    for (int i = 1; i < N; i++) {
       AD<double> xfit = vars[x_start + i];
       AD<double> dydxfit  = 3 * coeffs[3] * xfit * xfit + 2 * coeffs[2] * xfit + coeffs[1];
       AD<double> dydx2fit = CppAD::fabs(6 * coeffs[3] * xfit + 2 * coeffs[2]);
       AD<double> nearzero(0.0001);
       AD<double> Rfit = CppAD::pow(1 + dydxfit * dydxfit, 1.5) / CppAD::CondExpGt(dydx2fit, nearzero, dydx2fit, nearzero);  
       AD<double> lat_acc = CppAD::fabs(vars[v_start+i] * vars[v_start + i] / Rfit);
-      AD<double> lat_acc_th = 2.0 * 9.8; // #gs * gravity 
+      AD<double> lat_acc_th = 4.0 * 9.8; // #gs * gravity 
       AD<double> d_lat_acc = lat_acc - lat_acc_th;
-      AD<double> lat_acc_eval = CppAD::CondExpGt(d_lat_acc, nearzero, d_lat_acc, nearzero);
+      //AD<double> lat_acc_eval = CppAD::CondExpGt(d_lat_acc, nearzero, d_lat_acc, nearzero);
       //std::cout << "lat acc = " << lat_acc << " th = " << lat_acc_th << " eval = " << lat_acc_eval << "\n";
-      fg[0] +=  0.5 * CppAD::pow(lat_acc_eval, 2); // 
+      AD<double> lat_acc_eval = d_lat_acc;
+      fg[0] +=  0.1 * CppAD::pow(lat_acc_eval, 2); // 
       
     }
     
-    
-	    
     //
     // Setup Constraints
     //
@@ -158,7 +159,7 @@ class FG_eval {
           // v = v0;
           // R = Lf / delta0;
           // psi_dot = v0 * delta0 / Lf;
-          // Used non-linear motion model from the Unscented filter project
+          // Used non-linear motion model from the Unscented Kalmen filter project
           
           AD<double> zero(0.);
           
@@ -204,7 +205,7 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   double x    = state[0];
   double y    = state[1];
   double psi  = state[2];
-  double v    = state[3] * 0.44704; // converts mph to m/s
+  double v    = state[3] * mph_to_mps; // converts mph to m/s
   double cte  = state[4];
   double epsi = state[5];
   double sa   = - state[6]; // steering angle in radians
@@ -252,8 +253,8 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   // degrees (values in radians).
   // NOTE: Feel free to change this to something else.
   for (int i = delta_start; i < a_start; i++) {
-    vars_lowerbound[i] = -0.436332;
-    vars_upperbound[i] =  0.436332;
+    vars_lowerbound[i] = -max_delta;
+    vars_upperbound[i] =  max_delta;
   }
 
   // Acceleration/decceleration upper and lower limits.
