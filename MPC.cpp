@@ -78,15 +78,15 @@ class FG_eval {
     // Minimize the value gap between sequential actuations.
     for (int i = 1; i < N - 2; i++) {
       // Required for stability and to bound the change in the steering angle
-      fg[0] += 3000*CppAD::pow(vars[delta_start + i + 1] - vars[delta_start + i], 2); //
+      fg[0] += 2000*CppAD::pow(vars[delta_start + i + 1] - vars[delta_start + i], 2); //
       
-      // Very slight damping of throttle and brake.
-      fg[0] += 0*CppAD::pow(vars[a_start + i + 1] - vars[a_start + i], 2);
+      // damping of throttle and brake.
+      //fg[0] += 0*CppAD::pow(vars[a_start + i + 1] - vars[a_start + i], 2);
       
       // Required to prevent left/ right oscillations.  Tuned so that oscillations quickly decayed.
       // Also wanted to make sure CTE error returned to zero in about 0.5 s.
       // At a multiple of 10, a change in one meter in one time step is equialent to a 1 m error.
-      fg[0] += 10*CppAD::pow(vars[cte_start  + i + 1] - vars[cte_start  + 1], 2); // 5
+      fg[0] += 5*CppAD::pow(vars[cte_start  + i + 1] - vars[cte_start  + 1], 2); // 5
       
       // Angles cannot jump.  Below was not needed.
       // fg[0] += 0*CppAD::pow(vars[epsi_start + i + 1] - vars[epsi_start + i], 2); // 0
@@ -162,10 +162,11 @@ class FG_eval {
           // Used non-linear motion model from the Unscented Kalmen filter project
           
           AD<double> zero(0.);
+          AD<double> vavg = v0 + 1 / 2 * a0;
           
-          AD<double> d0x = x1 - (x0 + v0 * CppAD::cos(psi0) * dt);
-          AD<double> d0y = y1 - (y0 + v0 * CppAD::sin(psi0) * dt);
-          AD<double> psi1c = psi0 + v0 * delta0 / Lf * dt;
+          AD<double> d0x = x1 - (x0 + vavg * CppAD::cos(psi0) * dt);
+          AD<double> d0y = y1 - (y0 + vavg * CppAD::sin(psi0) * dt);
+          AD<double> psi1c = psi0 + vavg * delta0 / Lf * dt;
           
           AD<double> adelta0 = CppAD::fabs(delta0);
           AD<double> deladj;
@@ -181,8 +182,8 @@ class FG_eval {
           fg[2 + y_start    + i] = CppAD::CondExpGt(adelta0, zero, d0y, dn0y);
           fg[2 + psi_start  + i] = psi1  - psi1c;
           fg[2 + v_start    + i] = v1    - (v0 + a0 * dt);
-          fg[2 + cte_start  + i] = cte1  - ((f0 - y0) + (v0 * CppAD::sin(epsi0) * dt));
-          fg[2 + epsi_start + i] = epsi1 - ((psi0 - psides0) + v0 * delta0 / Lf * dt);
+          fg[2 + cte_start  + i] = cte1  - ((f0 - y0) + (vavg * CppAD::sin(epsi0) * dt));
+          fg[2 + epsi_start + i] = epsi1 - ((psi0 - psides0) + vavg * delta0 / Lf * dt);
 
      }  
      //std::cout << "set changes \n\n";
