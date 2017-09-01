@@ -77,10 +77,8 @@ int main() {
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
     string sdata = string(data).substr(0, length);
-    //cout << sdata << endl;
     if (sdata.size() > 2 && sdata[0] == '4' && sdata[1] == '2') {
       string s = hasData(sdata);
-      //std::cout << "s = " << s << "\n";
       if (s != "") {
         auto j = json::parse(s);
         string event = j[0].get<string>();
@@ -120,12 +118,8 @@ int main() {
           Eigen::VectorXd state(8);
           state << 0, 0, 0, v, cte, epsi, steer_value, throttle_value;
           
-          //std::cout << "main before MPC \n\n";
-          
           auto vars = mpc.Solve(state, coeffs);
           
-          //std::cout << "main after MPC \n\n";
-
           //Display the waypoints/reference line
           vector<double> next_x_vals;
           vector<double> next_y_vals;
@@ -156,7 +150,6 @@ int main() {
   	  	  json msgJson;
   	  	  
           msgJson["steering_angle"] = -vars[0] / deg2rad(25);
-          // std::cout << "Steering_angle = " << -vars[0] / deg2rad(25) << " Throttle = " << vars[1] << "\n";
           msgJson["throttle"] = vars[1];
           //Display the waypoints/reference line
           msgJson["next_x"] = next_x_vals;
@@ -179,7 +172,6 @@ int main() {
           this_thread::sleep_for(chrono::milliseconds(100));
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
           
-          //std::cout << msg << msg.data() << "\n";
         }
       } else {
         // Manual driving
