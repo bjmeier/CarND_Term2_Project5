@@ -7,7 +7,7 @@ using CppAD::AD;
 
 // TODO: Set the timestep length and duration
 // 10 and .1 from the project video worked well
-size_t N = 10;
+size_t N = 11;
 double dt = 0.1;
 
 // This value assumes the model presented in the classroom is used.
@@ -57,7 +57,7 @@ class FG_eval {
 	fg[0] = 0;
 
     // The part of the cost based on the reference state.
-    for (int i = 1; i < N; i++) {
+    for (int i = 2; i < N; i++) {
       //  Reference value.  Exponent of 4 was selected to make small errors small, and large errors large
       fg[0] +=  1 * CppAD::pow(vars[cte_start + i], 4);
       
@@ -76,36 +76,36 @@ class FG_eval {
    // }
     
     // Minimize the value gap between sequential actuations.
-    for (int i = 1; i < N - 2; i++) {
+    for (int i = 1; i < N-1; i++) {
       // Required for stability and to bound the change in the steering angle
-      fg[0] += 2000*CppAD::pow(vars[delta_start + i + 1] - vars[delta_start + i], 2); //
+      fg[0] += 1000*CppAD::pow(vars[delta_start + i] - vars[delta_start + i - 1], 2); //
       
       // damping of throttle and brake.
-      //fg[0] += 0*CppAD::pow(vars[a_start + i + 1] - vars[a_start + i], 2);
+      //fg[0] += 10*CppAD::pow(vars[a_start + i + 1] - vars[a_start + i], 2);
       
       // Required to prevent left/ right oscillations.  Tuned so that oscillations quickly decayed.
       // Also wanted to make sure CTE error returned to zero in about 0.5 s.
       // At a multiple of 10, a change in one meter in one time step is equialent to a 1 m error.
-      fg[0] += 5*CppAD::pow(vars[cte_start  + i + 1] - vars[cte_start  + 1], 2); // 5
+      fg[0] += 100*CppAD::pow(vars[cte_start  + i] - vars[cte_start  + i - 1], 2); // 5
       
       // Angles cannot jump.  Below was not needed.
       // fg[0] += 0*CppAD::pow(vars[epsi_start + i + 1] - vars[epsi_start + i], 2); // 0
     }
     
     // Using lateral acceleration to control speed
-    for (int i = 1; i < N; i++) {
+    for (int i = 2; i < N; i++) {
       AD<double> xfit = vars[x_start + i];
       AD<double> dydxfit  = 3 * coeffs[3] * xfit * xfit + 2 * coeffs[2] * xfit + coeffs[1];
       AD<double> dydx2fit = CppAD::fabs(6 * coeffs[3] * xfit + 2 * coeffs[2]);
       AD<double> nearzero(0.0001);
       AD<double> Rfit = CppAD::pow(1 + dydxfit * dydxfit, 1.5) / CppAD::CondExpGt(dydx2fit, nearzero, dydx2fit, nearzero);  
       AD<double> lat_acc = CppAD::fabs(vars[v_start+i] * vars[v_start + i] / Rfit);
-      AD<double> lat_acc_th = 4.0 * 9.8; // #gs * gravity 
-      AD<double> d_lat_acc = lat_acc - lat_acc_th;
+      AD<double> lat_acc_sp = 4.5 * 9.8; // #gs * gravity 
+      AD<double> d_lat_acc = lat_acc_sp - lat_acc;
       //AD<double> lat_acc_eval = CppAD::CondExpGt(d_lat_acc, nearzero, d_lat_acc, nearzero);
       //std::cout << "lat acc = " << lat_acc << " th = " << lat_acc_th << " eval = " << lat_acc_eval << "\n";
       AD<double> lat_acc_eval = d_lat_acc;
-      fg[0] +=  0.1 * CppAD::pow(lat_acc_eval, 2); // 
+      fg[0] +=  .05 * CppAD::pow(lat_acc_eval, 2); // 
       
     }
     
@@ -177,12 +177,15 @@ class FG_eval {
           AD<double> dn0x = x1 - (x0 + Lf / (delta0+deladj) * (CppAD::sin(psi1c) - CppAD::sin(psi0)));
           AD<double> dn0y = y1 - (y0 + Lf / (delta0+deladj) * (CppAD::cos(psi0)  - CppAD::cos(psi1c)));
           
+          AD<double> dy0  = vavg * CppAD::sin(psi0) * dt;
+          AD<double> dyn0 = Lf / (delta0+deladj) * (CppAD::cos(psi0)  - CppAD::cos(psi1c));
           
-          fg[2 + x_start    + i] = CppAD::CondExpGt(adelta0, zero, d0x, dn0x);
-          fg[2 + y_start    + i] = CppAD::CondExpGt(adelta0, zero, d0y, dn0y);
+          
+          fg[2 + x_start    + i] = CppAD::CondExpGt(adelta0, zero, dn0x, d0x);
+          fg[2 + y_start    + i] = CppAD::CondExpGt(adelta0, zero, dn0y, d0y);
           fg[2 + psi_start  + i] = psi1  - psi1c;
           fg[2 + v_start    + i] = v1    - (v0 + a0 * dt);
-          fg[2 + cte_start  + i] = cte1  - ((f0 - y0) + (vavg * CppAD::sin(epsi0) * dt));
+          fg[2 + cte_start  + i] = cte1  - ((f0 - y0) + CppAD::CondExpGt(adelta0, zero, dyn0, dy0));
           fg[2 + epsi_start + i] = epsi1 - ((psi0 - psides0) + vavg * delta0 / Lf * dt);
 
      }  
